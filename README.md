@@ -14,10 +14,13 @@ A proxy node pool management tool based on [sing-box](https://github.com/SagerNe
 - **Multi-Port Mode**: Each node listens on independent port
 - **Hybrid Mode**: Pool + Multi-Port simultaneously with shared node state
 - **Web Dashboard**: Real-time node status, latency probing, one-click export
+- **WebUI Settings**: Modify external_ip and probe_target without editing config files
 - **Password Protection**: WebUI authentication support
 - **Auto Health Check**: Initial check on startup, periodic checks every 5 minutes
 - **Smart Node Filtering**: Auto-hide unavailable nodes, sort by latency
+- **Port Preservation**: Existing nodes keep their ports when adding/updating nodes
 - **Flexible Configuration**: Config file, node file, subscription links
+- **Multi-Architecture**: Docker images for both AMD64 and ARM64
 
 ## Quick Start
 
@@ -331,6 +334,18 @@ Access `http://localhost:9090` to view:
 - Manual latency probing
 - Release blacklisted nodes
 - **One-click Export**: Export all available nodes as proxy URIs (`http://user:pass@host:port`)
+- **Settings**: Click the gear icon to modify `external_ip` and `probe_target` (changes saved immediately)
+
+### WebUI Settings
+
+Click the ⚙️ gear icon in the header to access settings:
+
+| Setting | Description |
+|---------|-------------|
+| External IP | IP address used in exported proxy URIs (replaces `0.0.0.0`) |
+| Probe Target | Health check target address (format: `host:port`) |
+
+Changes are saved to `config.yaml` immediately and take effect without restart.
 
 ### Node Management
 
@@ -340,6 +355,7 @@ The Web UI provides a **Node Management** tab for CRUD operations on proxy nodes
 - **Edit Node**: Modify existing node configuration
 - **Delete Node**: Remove nodes from configuration
 - **Reload Config**: Apply changes by restarting sing-box core (⚠️ interrupts connections)
+- **Port Preservation**: Existing nodes keep their assigned ports after reload
 
 In Multi-Port mode, ports are automatically allocated from `base_port`.
 
@@ -352,6 +368,8 @@ In Multi-Port mode, ports are automatically allocated from `base_port`.
 | PUT | `/api/nodes/config/:name` | Update node by name |
 | DELETE | `/api/nodes/config/:name` | Delete node by name |
 | POST | `/api/reload` | Reload configuration |
+| GET | `/api/settings` | Get current settings |
+| PUT | `/api/settings` | Update settings (external_ip, probe_target) |
 
 **Request/Response Example:**
 
