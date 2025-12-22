@@ -43,7 +43,7 @@ func Build(cfg *config.Config) (option.Options, error) {
 			usedTags[baseTag] = 1
 		}
 
-		outbound, err := buildNodeOutbound(tag, node.URI)
+		outbound, err := buildNodeOutbound(tag, node.URI, cfg.SkipCertVerify)
 		if err != nil {
 			log.Printf("❌ Failed to build node '%s': %v (skipping)", node.Name, err)
 			failedNodes = append(failedNodes, node.Name)
@@ -209,20 +209,20 @@ func buildPoolInbound(cfg *config.Config) (option.Inbound, error) {
 	return inbound, nil
 }
 
-func buildNodeOutbound(tag, rawURI string) (option.Outbound, error) {
+func buildNodeOutbound(tag, rawURI string, skipCertVerify bool) (option.Outbound, error) {
 	parsed, err := url.Parse(rawURI)
 	if err != nil {
 		return option.Outbound{}, fmt.Errorf("parse uri: %w", err)
 	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "vless":
-		opts, err := buildVLESSOptions(parsed)
+		opts, err := buildVLESSOptions(parsed, skipCertVerify)
 		if err != nil {
 			return option.Outbound{}, err
 		}
 		return option.Outbound{Type: C.TypeVLESS, Tag: tag, Options: &opts}, nil
 	case "hysteria2":
-		opts, err := buildHysteria2Options(parsed)
+		opts, err := buildHysteria2Options(parsed, skipCertVerify)
 		if err != nil {
 			return option.Outbound{}, err
 		}
@@ -234,13 +234,13 @@ func buildNodeOutbound(tag, rawURI string) (option.Outbound, error) {
 		}
 		return option.Outbound{Type: C.TypeShadowsocks, Tag: tag, Options: &opts}, nil
 	case "trojan":
-		opts, err := buildTrojanOptions(parsed)
+		opts, err := buildTrojanOptions(parsed, skipCertVerify)
 		if err != nil {
 			return option.Outbound{}, err
 		}
 		return option.Outbound{Type: C.TypeTrojan, Tag: tag, Options: &opts}, nil
 	case "vmess":
-		opts, err := buildVMessOptions(rawURI)
+		opts, err := buildVMessOptions(rawURI, skipCertVerify)
 		if err != nil {
 			return option.Outbound{}, err
 		}
@@ -250,7 +250,7 @@ func buildNodeOutbound(tag, rawURI string) (option.Outbound, error) {
 	}
 }
 
-func buildVLESSOptions(u *url.URL) (option.VLESSOutboundOptions, error) {
+func buildVLESSOptions(u *url.URL, skipCertVerify bool) (option.VLESSOutboundOptions, error) {
 	uuid := u.User.Username()
 	if uuid == "" {
 		return option.VLESSOutboundOptions{}, errors.New("vless uri missing uuid in userinfo")
@@ -276,7 +276,7 @@ func buildVLESSOptions(u *url.URL) (option.VLESSOutboundOptions, error) {
 	} else if transport != nil {
 		opts.Transport = transport
 	}
-	if tlsOptions, err := buildTLSOptions(query); err != nil {
+	if tlsOptions, err := buildTLSOptions(query, skipCertVerify); err != nil {
 		return option.VLESSOutboundOptions{}, err
 	} else if tlsOptions != nil {
 		opts.OutboundTLSOptionsContainer = option.OutboundTLSOptionsContainer{TLS: tlsOptions}
@@ -284,7 +284,7 @@ func buildVLESSOptions(u *url.URL) (option.VLESSOutboundOptions, error) {
 	return opts, nil
 }
 
-func buildHysteria2Options(u *url.URL) (option.Hysteria2OutboundOptions, error) {
+func buildHysteria2Options(u *url.URL, skipCertVerify bool) (option.Hysteria2OutboundOptions, error) {
 	password := u.User.String()
 	server, port, err := hostPort(u, 443)
 	if err != nil {
@@ -304,14 +304,15 @@ func buildHysteria2Options(u *url.URL) (option.Hysteria2OutboundOptions, error) 
 	if obfs := query.Get("obfs"); obfs != "" {
 		opts.Obfs = &option.Hysteria2Obfs{Type: obfs, Password: query.Get("obfs-password")}
 	}
-	opts.OutboundTLSOptionsContainer = option.OutboundTLSOptionsContainer{TLS: hysteriaTLSOptions(server, query)}
+	opts.OutboundTLSOptionsContainer = option.OutboundTLSOptionsContainer{TLS: hysteriaTLSOptions(server, query, skipCertVerify)}
 	return opts, nil
 }
 
-func hysteriaTLSOptions(host string, query url.Values) *option.OutboundTLSOptions {
+func hysteriaTLSOptions(host string, query url.Values, skipCertVerify bool) *option.OutboundTLSOptions {
 	tlsOptions := &option.OutboundTLSOptions{
 		Enabled:    true,
 		ServerName: host,
+		Insecure:   skipCertVerify,
 	}
 	if sni := query.Get("sni"); sni != "" {
 		tlsOptions.ServerName = sni
@@ -329,12 +330,12 @@ func hysteriaTLSOptions(host string, query url.Values) *option.OutboundTLSOption
 	return tlsOptions
 }
 
-func buildTLSOptions(query url.Values) (*option.OutboundTLSOptions, error) {
+func buildTLSOptions(query url.Values, skipCertVerify bool) (*option.OutboundTLSOptions, error) {
 	security := strings.ToLower(query.Get("security"))
 	if security == "" || security == "none" {
 		return nil, nil
 	}
-	tlsOptions := &option.OutboundTLSOptions{Enabled: true}
+	tlsOptions := &option.OutboundTLSOptions{Enabled: true, Insecure: skipCertVerify}
 	if sni := query.Get("sni"); sni != "" {
 		tlsOptions.ServerName = sni
 	}
@@ -455,7 +456,7 @@ func buildShadowsocksOptions(u *url.URL) (option.ShadowsocksOutboundOptions, err
 	return opts, nil
 }
 
-func buildTrojanOptions(u *url.URL) (option.TrojanOutboundOptions, error) {
+func buildTrojanOptions(u *url.URL, skipCertVerify bool) (option.TrojanOutboundOptions, error) {
 	password := u.User.Username()
 	if password == "" {
 		return option.TrojanOutboundOptions{}, errors.New("trojan uri missing password in userinfo")
@@ -474,7 +475,7 @@ func buildTrojanOptions(u *url.URL) (option.TrojanOutboundOptions, error) {
 	}
 
 	// Parse TLS options
-	if tlsOptions, err := buildTrojanTLSOptions(query); err != nil {
+	if tlsOptions, err := buildTrojanTLSOptions(query, skipCertVerify); err != nil {
 		return option.TrojanOutboundOptions{}, err
 	} else if tlsOptions != nil {
 		opts.OutboundTLSOptionsContainer = option.OutboundTLSOptionsContainer{TLS: tlsOptions}
@@ -535,7 +536,7 @@ func (v *vmessJSON) GetAlterId() int {
 	return 0
 }
 
-func buildVMessOptions(rawURI string) (option.VMessOutboundOptions, error) {
+func buildVMessOptions(rawURI string, skipCertVerify bool) (option.VMessOutboundOptions, error) {
 	// Remove vmess:// prefix
 	encoded := strings.TrimPrefix(rawURI, "vmess://")
 
@@ -546,7 +547,7 @@ func buildVMessOptions(rawURI string) (option.VMessOutboundOptions, error) {
 		decoded, err = base64.RawURLEncoding.DecodeString(encoded)
 		if err != nil {
 			// Try as URL format: vmess://uuid@server:port?...
-			return buildVMessOptionsFromURL(rawURI)
+			return buildVMessOptionsFromURL(rawURI, skipCertVerify)
 		}
 	}
 
@@ -623,7 +624,7 @@ func buildVMessOptions(rawURI string) (option.VMessOutboundOptions, error) {
 
 	// Build TLS options
 	if vmess.TLS == "tls" {
-		tlsOptions := &option.OutboundTLSOptions{Enabled: true}
+		tlsOptions := &option.OutboundTLSOptions{Enabled: true, Insecure: skipCertVerify}
 		if vmess.SNI != "" {
 			tlsOptions.ServerName = vmess.SNI
 		} else if vmess.Host != "" {
@@ -641,7 +642,7 @@ func buildVMessOptions(rawURI string) (option.VMessOutboundOptions, error) {
 	return opts, nil
 }
 
-func buildVMessOptionsFromURL(rawURI string) (option.VMessOutboundOptions, error) {
+func buildVMessOptionsFromURL(rawURI string, skipCertVerify bool) (option.VMessOutboundOptions, error) {
 	parsed, err := url.Parse(rawURI)
 	if err != nil {
 		return option.VMessOutboundOptions{}, fmt.Errorf("parse vmess url: %w", err)
@@ -683,7 +684,7 @@ func buildVMessOptionsFromURL(rawURI string) (option.VMessOutboundOptions, error
 	}
 
 	// Build TLS
-	if tlsOptions, err := buildTLSOptions(query); err != nil {
+	if tlsOptions, err := buildTLSOptions(query, skipCertVerify); err != nil {
 		return option.VMessOutboundOptions{}, err
 	} else if tlsOptions != nil {
 		opts.OutboundTLSOptionsContainer = option.OutboundTLSOptionsContainer{TLS: tlsOptions}
@@ -692,9 +693,9 @@ func buildVMessOptionsFromURL(rawURI string) (option.VMessOutboundOptions, error
 	return opts, nil
 }
 
-func buildTrojanTLSOptions(query url.Values) (*option.OutboundTLSOptions, error) {
+func buildTrojanTLSOptions(query url.Values, skipCertVerify bool) (*option.OutboundTLSOptions, error) {
 	// Trojan always uses TLS by default
-	tlsOptions := &option.OutboundTLSOptions{Enabled: true}
+	tlsOptions := &option.OutboundTLSOptions{Enabled: true, Insecure: skipCertVerify}
 
 	if sni := query.Get("sni"); sni != "" {
 		tlsOptions.ServerName = sni

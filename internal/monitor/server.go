@@ -124,23 +124,25 @@ func (s *Server) SetConfig(cfg *config.Config) {
 	if cfg != nil {
 		s.cfg.ExternalIP = cfg.ExternalIP
 		s.cfg.ProbeTarget = cfg.Management.ProbeTarget
+		s.cfg.SkipCertVerify = cfg.SkipCertVerify
 	}
 }
 
 // getSettings returns current dynamic settings (thread-safe).
-func (s *Server) getSettings() (externalIP, probeTarget string) {
+func (s *Server) getSettings() (externalIP, probeTarget string, skipCertVerify bool) {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
-	return s.cfg.ExternalIP, s.cfg.ProbeTarget
+	return s.cfg.ExternalIP, s.cfg.ProbeTarget, s.cfg.SkipCertVerify
 }
 
 // updateSettings updates dynamic settings and persists to config file.
-func (s *Server) updateSettings(externalIP, probeTarget string) error {
+func (s *Server) updateSettings(externalIP, probeTarget string, skipCertVerify bool) error {
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 
 	s.cfg.ExternalIP = externalIP
 	s.cfg.ProbeTarget = probeTarget
+	s.cfg.SkipCertVerify = skipCertVerify
 
 	if s.cfgSrc == nil {
 		return errors.New("配置存储未初始化")
@@ -148,6 +150,7 @@ func (s *Server) updateSettings(externalIP, probeTarget string) error {
 
 	s.cfgSrc.ExternalIP = externalIP
 	s.cfgSrc.Management.ProbeTarget = probeTarget
+	s.cfgSrc.SkipCertVerify = skipCertVerify
 
 	if err := s.cfgSrc.Save(); err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
@@ -455,7 +458,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		// 在 pool 模式下，所有节点共享同一端口，也正常导出
 		listenAddr := snap.ListenAddress
 		if listenAddr == "0.0.0.0" || listenAddr == "::" {
-			if extIP, _ := s.getSettings(); extIP != "" {
+			if extIP, _, _ := s.getSettings(); extIP != "" {
 				listenAddr = extIP
 			}
 		}
@@ -477,19 +480,21 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(strings.Join(lines, "\n")))
 }
 
-// handleSettings handles GET/PUT for dynamic settings (external_ip, probe_target).
+// handleSettings handles GET/PUT for dynamic settings (external_ip, probe_target, skip_cert_verify).
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		extIP, probeTarget := s.getSettings()
+		extIP, probeTarget, skipCertVerify := s.getSettings()
 		writeJSON(w, map[string]any{
-			"external_ip":  extIP,
-			"probe_target": probeTarget,
+			"external_ip":      extIP,
+			"probe_target":     probeTarget,
+			"skip_cert_verify": skipCertVerify,
 		})
 	case http.MethodPut:
 		var req struct {
-			ExternalIP  string `json:"external_ip"`
-			ProbeTarget string `json:"probe_target"`
+			ExternalIP     string `json:"external_ip"`
+			ProbeTarget    string `json:"probe_target"`
+			SkipCertVerify bool   `json:"skip_cert_verify"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -500,16 +505,18 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		extIP := strings.TrimSpace(req.ExternalIP)
 		probeTarget := strings.TrimSpace(req.ProbeTarget)
 
-		if err := s.updateSettings(extIP, probeTarget); err != nil {
+		if err := s.updateSettings(extIP, probeTarget, req.SkipCertVerify); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			writeJSON(w, map[string]any{"error": err.Error()})
 			return
 		}
 
 		writeJSON(w, map[string]any{
-			"message":      "设置已保存",
-			"external_ip":  extIP,
-			"probe_target": probeTarget,
+			"message":          "设置已保存",
+			"external_ip":      extIP,
+			"probe_target":     probeTarget,
+			"skip_cert_verify": req.SkipCertVerify,
+			"need_reload":      true,
 		})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)

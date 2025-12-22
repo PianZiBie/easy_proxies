@@ -753,6 +753,54 @@
       flex: 1;
     }
 
+    /* Toggle Switch */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 50px;
+      height: 28px;
+      flex-shrink: 0;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: 0.3s;
+      border-radius: 28px;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 22px;
+      width: 22px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background-color: var(--primary);
+    }
+
+    .toggle-switch input:checked + .toggle-slider:before {
+      transform: translateX(22px);
+    }
+
     /* Probe Progress */
     .probe-progress {
       position: fixed;
@@ -1038,6 +1086,14 @@
           <input type="text" id="settingProbeTarget" class="form-input" placeholder="例如：www.apple.com:80" />
           <p class="form-help">健康检查时使用的目标地址，格式：host:port</p>
         </div>
+        <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+          <label class="form-label" for="settingSkipCertVerify" style="margin: 0; flex: 1;">跳过 SSL 证书验证</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="settingSkipCertVerify" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p class="form-help" style="margin-top: -8px;">启用后所有节点将忽略 SSL 证书错误，修改后需重载生效</p>
         <div id="settingsError" class="login-error"></div>
         <div class="modal-buttons">
           <button type="button" class="btn btn-secondary" onclick="hideSettingsModal()">取消</button>
@@ -1567,6 +1623,7 @@
         .then(data => {
           document.getElementById('settingExternalIP').value = data.external_ip || '';
           document.getElementById('settingProbeTarget').value = data.probe_target || '';
+          document.getElementById('settingSkipCertVerify').checked = data.skip_cert_verify || false;
           document.getElementById('settingsError').classList.remove('show');
           document.getElementById('settingsOverlay').classList.add('show');
         })
@@ -1587,7 +1644,8 @@
 
       const payload = {
         external_ip: document.getElementById('settingExternalIP').value.trim(),
-        probe_target: document.getElementById('settingProbeTarget').value.trim()
+        probe_target: document.getElementById('settingProbeTarget').value.trim(),
+        skip_cert_verify: document.getElementById('settingSkipCertVerify').checked
       };
 
       try {
@@ -1599,7 +1657,11 @@
 
         const data = await res.json();
         if (res.ok) {
-          showToast('设置保存成功', 'success');
+          if (data.need_reload) {
+            showToast('设置已保存，SSL 设置需重载生效', 'success');
+          } else {
+            showToast('设置保存成功', 'success');
+          }
           hideSettingsModal();
         } else {
           errorEl.textContent = data.error || '保存失败';
